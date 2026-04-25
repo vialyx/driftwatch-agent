@@ -1,29 +1,14 @@
-# cargo-deny configuration
+# cargo-deny configuration (compatible with cargo-deny >= 0.14)
 # https://embarkstudios.github.io/cargo-deny/
 
 [advisories]
-# The path where the advisory databases are cloned/fetched into
-#db-path = "~/.cargo/advisory-db"
-
 # The url(s) of the advisory databases to use
 db-urls = ["https://github.com/rustsec/advisory-db"]
-
-# The lint level for security vulnerabilities
-vulnerability = "deny"
-
-# The lint level for unmaintained crates
-unmaintained = "warn"
-
-# The lint level for crates that have been yanked from their source registry
-yanked = "deny"
-
-# The lint level for crates with security notices.
-notice = "warn"
 
 # Ignore specific advisories
 ignore = [
     # Add advisory IDs to ignore here, e.g.:
-    # "RUSTSEC-0000-0000",
+    # { id = "RUSTSEC-0000-0000", reason = "..." },
 ]
 
 [licenses]
