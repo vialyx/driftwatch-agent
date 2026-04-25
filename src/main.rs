@@ -8,9 +8,9 @@
 //! Exposes a local IPC interface for policy enforcement consumers and emits
 //! signed events to a central risk engine / SIEM.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use tracing::{error, info, warn};
@@ -370,8 +370,7 @@ fn state_dir() -> PathBuf {
             return PathBuf::from(path);
         }
         if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home)
-                .join("Library/Application Support/driftwatch-agent");
+            return PathBuf::from(home).join("Library/Application Support/driftwatch-agent");
         }
         PathBuf::from("./driftwatch-agent")
     }
