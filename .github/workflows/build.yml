@@ -57,9 +57,8 @@ jobs:
       - name: Install Linux aarch64 cross toolchain
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
-          sudo dpkg --add-architecture arm64
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config
+          sudo apt-get install -y gcc-aarch64-linux-gnu
       
       - name: Build (default)
         if: matrix.target != 'aarch64-unknown-linux-gnu'
