@@ -10,6 +10,8 @@ use std::{
     fs,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
+use tokio::time::{sleep, Duration};
+use zbus::{zvariant::OwnedObjectPath, Proxy};
 
 use crate::scoring::{
     device_quantity::EnrolledDevice,
@@ -37,10 +39,104 @@ impl GeoProvider for LinuxGeoProvider {
 
 /// Attempt to get a reading from GeoClue2 over D-Bus.
 async fn geoclue2_reading() -> Result<GeoReading> {
-    // Full implementation uses the zbus proxy generated from the GeoClue2 introspection XML.
-    // At runtime this requires the GeoClue2 daemon to be present and the
-    // org.freedesktop.GeoClue2 service to be accessible on the session/system bus.
-    Err(anyhow!("GeoClue2 not yet implemented"))
+    let conn = zbus::Connection::system()
+        .await
+        .context("failed to connect to system D-Bus")?;
+
+    let manager = Proxy::new(
+        &conn,
+        "org.freedesktop.GeoClue2",
+        "/org/freedesktop/GeoClue2/Manager",
+        "org.freedesktop.GeoClue2.Manager",
+    )
+    .await
+    .context("failed to create GeoClue2 manager proxy")?;
+
+    let client_path: OwnedObjectPath = manager
+        .call("GetClient", &())
+        .await
+        .context("GeoClue2 GetClient call failed")?;
+
+    let client = Proxy::new(
+        &conn,
+        "org.freedesktop.GeoClue2",
+        client_path.as_str(),
+        "org.freedesktop.GeoClue2.Client",
+    )
+    .await
+    .context("failed to create GeoClue2 client proxy")?;
+
+    // Identifier shown in geoclue logs/policy decisions.
+    client
+        .set_property("DesktopId", "driftwatch-agent")
+        .await
+        .context("failed to set GeoClue2 DesktopId")?;
+    // 6 = exact, 4 = city-level, etc.
+    client
+        .set_property("RequestedAccuracyLevel", 6u32)
+        .await
+        .context("failed to set GeoClue2 RequestedAccuracyLevel")?;
+
+    let _: () = client
+        .call("Start", &())
+        .await
+        .context("GeoClue2 Start call failed")?;
+
+    // Location may not be available immediately; poll briefly.
+    let mut last_err: Option<anyhow::Error> = None;
+    for _ in 0..20 {
+        match read_geoclue_location(&conn, &client).await {
+            Ok(reading) => return Ok(reading),
+            Err(e) => {
+                last_err = Some(e);
+                sleep(Duration::from_millis(250)).await;
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| anyhow!("GeoClue2 location unavailable")))
+}
+
+async fn read_geoclue_location(conn: &zbus::Connection, client: &Proxy<'_>) -> Result<GeoReading> {
+    let location_path: OwnedObjectPath = client
+        .get_property("Location")
+        .await
+        .context("failed to read GeoClue2 Location property")?;
+
+    // During startup GeoClue2 can expose '/' before a concrete location is ready.
+    if location_path.as_str() == "/" {
+        return Err(anyhow!("GeoClue2 location not ready"));
+    }
+
+    let location = Proxy::new(
+        conn,
+        "org.freedesktop.GeoClue2",
+        location_path.as_str(),
+        "org.freedesktop.GeoClue2.Location",
+    )
+    .await
+    .context("failed to create GeoClue2 location proxy")?;
+
+    let lat: f64 = location
+        .get_property("Latitude")
+        .await
+        .context("failed to read GeoClue2 latitude")?;
+    let lon: f64 = location
+        .get_property("Longitude")
+        .await
+        .context("failed to read GeoClue2 longitude")?;
+    let acc: f64 = location
+        .get_property("Accuracy")
+        .await
+        .context("failed to read GeoClue2 accuracy")?;
+
+    Ok(GeoReading {
+        lat,
+        lon,
+        accuracy_meters: (acc as f32).max(0.0),
+        source: GeoSource::GeoClue2,
+        timestamp: Utc::now(),
+    })
 }
 
 /// GeoIP fallback using ip-api.com.

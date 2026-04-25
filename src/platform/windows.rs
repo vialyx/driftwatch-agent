@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use std::net::IpAddr;
 use tokio::process::Command;
+use tracing::warn;
 
 use crate::scoring::{
     device_quantity::EnrolledDevice,
@@ -23,11 +24,16 @@ pub struct WindowsGeoProvider;
 #[async_trait]
 impl GeoProvider for WindowsGeoProvider {
     async fn current_reading(&self) -> Result<GeoReading> {
-        // Full implementation would call:
-        //   windows::Devices::Geolocation::Geolocator::new()?
-        //       .GetGeopositionAsync()?.await?
-        // Requires `com.microsoft.windows.location` capability in the manifest.
-        geoip_fallback().await
+        match winrt_reading().await {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                warn!(
+                    "WinRT geolocation unavailable ({}), falling back to GeoIP",
+                    e
+                );
+                geoip_fallback().await
+            }
+        }
     }
 }
 
@@ -112,6 +118,80 @@ async fn geoip_fallback() -> Result<GeoReading> {
         source: GeoSource::GeoIP,
         timestamp: Utc::now(),
     })
+}
+
+/// Attempt to retrieve location from native Windows geolocation APIs via
+/// .NET's `GeoCoordinateWatcher` (which uses WinRT/location services under the hood).
+async fn winrt_reading() -> Result<GeoReading> {
+    let script = r#"
+Add-Type -AssemblyName System.Device
+$watcher = New-Object System.Device.Location.GeoCoordinateWatcher
+$started = $watcher.TryStart($false, [TimeSpan]::FromSeconds(8))
+if (-not $started) {
+    Write-Error 'geolocation start timeout'
+    exit 2
+}
+
+$loc = $watcher.Position.Location
+if ($null -eq $loc -or $loc.IsUnknown) {
+    Write-Error 'geolocation unknown'
+    exit 3
+}
+
+$acc = if ($loc.HorizontalAccuracy -gt 0) { $loc.HorizontalAccuracy } else { 100 }
+Write-Output ("{0},{1},{2}" -f $loc.Latitude, $loc.Longitude, $acc)
+"#;
+
+    let output = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ])
+        .output()
+        .await
+        .map_err(|e| anyhow!("failed to execute WinRT geolocation probe: {}", e))?;
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "WinRT geolocation probe failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let (lat, lon, acc) = parse_csv_triplet(stdout.trim())?;
+
+    Ok(GeoReading {
+        lat,
+        lon,
+        accuracy_meters: acc.max(0.0),
+        source: GeoSource::WinRT,
+        timestamp: Utc::now(),
+    })
+}
+
+fn parse_csv_triplet(s: &str) -> Result<(f64, f64, f32)> {
+    let mut it = s.split(',').map(str::trim);
+    let lat = it
+        .next()
+        .ok_or_else(|| anyhow!("missing latitude in WinRT output"))?
+        .parse::<f64>()
+        .map_err(|e| anyhow!("invalid latitude in WinRT output: {}", e))?;
+    let lon = it
+        .next()
+        .ok_or_else(|| anyhow!("missing longitude in WinRT output"))?
+        .parse::<f64>()
+        .map_err(|e| anyhow!("invalid longitude in WinRT output: {}", e))?;
+    let acc = it
+        .next()
+        .ok_or_else(|| anyhow!("missing accuracy in WinRT output"))?
+        .parse::<f32>()
+        .map_err(|e| anyhow!("invalid accuracy in WinRT output: {}", e))?;
+    Ok((lat, lon, acc))
 }
 
 fn parse_netstat_output(stdout: &str) -> Vec<NetworkConnection> {

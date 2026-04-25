@@ -25,9 +25,9 @@ Exposes a local IPC interface for policy enforcement and emits signed events to 
 - Secure IPC with bearer tokens
 
 🌍 **Cross-Platform Support**
-- **macOS** - Core Location + WiFi RTT + Keychain
-- **Windows** - Geolocation API + Credential Manager
-- **Linux** - GeoClue2 + Secret Service
+- **macOS** - CoreLocation (Swift bridge) + Keychain + network monitoring
+- **Windows** - WinRT/.NET geolocation + Credential Manager + network monitoring
+- **Linux** - GeoClue2 (D-Bus) + Secret Service + `/proc/net/*` monitoring
 
 📊 **High Performance**
 - Asynchronous event processing (Tokio)
@@ -54,9 +54,10 @@ cargo build --release
 ### Test
 
 ```bash
-cargo test                    # All tests (79 total)
+cargo test                    # All tests (80 total)
 cargo test --lib             # Unit tests only (54)
 cargo test --test scoring_tests  # Integration tests (25)
+DRIFTWATCH_PLATFORM_SMOKE=1 cargo test --test platform_geo_smoke  # Opt-in platform geo smoke
 cargo bench                   # Run benchmarks (20 suites)
 ```
 
@@ -115,8 +116,8 @@ Monitors enrolled device count:
 
 ### IPC Interface
 
-**Unix Socket**: `/tmp/driftwatch.sock` (macOS/Linux)  
-**Windows Named Pipe**: `\\.\pipe\driftwatch` (Windows)
+**Unix Socket**: `/var/run/riskagent.sock` (macOS/Linux)  
+**Windows Named Pipe**: `\\.\pipe\riskagent` (Windows)
 
 **Requests**:
 ```json
@@ -141,9 +142,9 @@ Monitors enrolled device count:
 - **Formatted code** - `cargo fmt` applied throughout
 
 ### ✅ Test Coverage
-- **79 Total Tests** - 100% pass rate
+- **80 Total Tests** - 100% pass rate
   - **54 Unit Tests** - Core modules (config, keychain, ipc, telemetry, scoring)
-  - **25 Integration Tests** - End-to-end scoring scenarios
+   - **26 Integration Tests** - End-to-end scoring + platform geo smoke
 - Run with: `cargo test`
 
 ### ✅ Benchmarking
@@ -159,7 +160,7 @@ Monitors enrolled device count:
 
 1. **test.yml** - Multi-platform testing
    - Platforms: Ubuntu, macOS, Windows
-   - Versions: stable, beta, MSRV (1.70)
+   - Versions: stable, beta, MSRV (1.86)
    - Coverage: unit, integration, doc tests
 
 2. **lint.yml** - Code quality gates

@@ -67,3 +67,22 @@ jobs:
       
       - name: Run all tests with all features
         run: cargo test --all-features --verbose
+
+  platform-geo-smoke:
+    name: Platform Geo Smoke
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run platform geolocation smoke tests
+        run: cargo test --test platform_geo_smoke --verbose
+        env:
+          DRIFTWATCH_PLATFORM_SMOKE: "0"

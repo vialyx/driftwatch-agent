@@ -35,10 +35,7 @@ use scoring::{
 #[tokio::main]
 async fn main() -> Result<()> {
     // Load configuration.
-    let cfg = AgentConfig::load().unwrap_or_else(|e| {
-        eprintln!("Failed to load configuration: {}", e);
-        std::process::exit(1);
-    });
+    let cfg = AgentConfig::load().context("failed to load configuration")?;
 
     // Initialise logging.
     let log_level: tracing::Level = cfg.agent.log_level.parse().unwrap_or(tracing::Level::INFO);
@@ -56,28 +53,23 @@ async fn main() -> Result<()> {
     // Build platform-appropriate providers.
     let geo_provider: Arc<dyn GeoProvider> = build_geo_provider();
     let network_monitor: Arc<dyn NetworkMonitor> = build_network_monitor();
-    let identity_id = get_identity_id().unwrap_or_else(|e| {
-        error!("Failed to resolve identity ID: {}", e);
-        std::process::exit(1);
-    });
+    let identity_id = get_identity_id().context("failed to resolve identity ID")?;
 
     let device_registry: Arc<dyn DeviceRegistry> = build_device_registry(&cfg, identity_id.clone());
 
     // IPC state shared between the polling loop and the IPC server.
     let (force_refresh_tx, mut force_refresh_rx) = tokio::sync::watch::channel(());
-    let ipc_token = get_or_create_ipc_token().unwrap_or_else(|e| {
-        error!("Failed to initialize IPC auth token: {}", e);
-        std::process::exit(1);
-    });
+    let ipc_token = get_or_create_ipc_token().context("failed to initialize IPC auth token")?;
     let ipc_state = IpcState::new(force_refresh_tx, ipc_token, 1000);
 
     // Retrieve (or generate) the HMAC signing key from the platform keychain.
-    let signing_key = get_or_create_signing_key();
+    let signing_key = get_or_create_signing_key().context("failed to initialize signing key")?;
 
     // Telemetry emitter with local SQLite queue.
     let queue_db_path = state_dir().join("driftwatch_queue.db");
     if let Some(parent) = queue_db_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create state directory: {}", parent.display()))?;
     }
 
     let emitter = Arc::new(
@@ -88,10 +80,7 @@ async fn main() -> Result<()> {
             signing_key,
             queue_db_path.to_string_lossy().as_ref(),
         )
-        .unwrap_or_else(|e| {
-            error!("Failed to initialise telemetry emitter: {}", e);
-            std::process::exit(1);
-        }),
+        .context("failed to initialise telemetry emitter")?,
     );
 
     // Spawn the IPC server.
@@ -326,15 +315,22 @@ fn get_identity_id() -> Result<String> {
 ///
 /// This path only runs once on first start when the keychain is unavailable.
 /// The generated key is immediately stored in the keychain for subsequent runs.
-fn get_or_create_signing_key() -> Vec<u8> {
-    keychain::get_secret("driftwatch", "signing-key").unwrap_or_else(|_| {
-        let mut key = vec![0u8; 32];
-        if let Err(e) = getrandom::getrandom(&mut key) {
-            panic!("OS CSPRNG unavailable: {}", e);
-        }
-        let _ = keychain::set_secret("driftwatch", "signing-key", &key);
-        key
-    })
+fn get_or_create_signing_key() -> Result<Vec<u8>> {
+    if let Ok(key) = keychain::get_secret("driftwatch", "signing-key") {
+        return Ok(key);
+    }
+
+    let mut key = vec![0u8; 32];
+    getrandom::getrandom(&mut key).map_err(|e| anyhow!("OS CSPRNG unavailable: {}", e))?;
+
+    if let Err(e) = keychain::set_secret("driftwatch", "signing-key", &key) {
+        warn!(
+            "failed to persist signing key to keychain (using ephemeral in-memory key): {}",
+            e
+        );
+    }
+
+    Ok(key)
 }
 
 /// Return or create a random token used to authenticate local IPC requests.
@@ -407,8 +403,24 @@ async fn refresh_threat_feed(url: &str) -> Result<ThreatFeed> {
         .timeout(Duration::from_secs(10))
         .build()?;
 
-    let indicators: Vec<scoring::network_risk::Indicator> =
-        client.get(url).send().await?.json().await?;
+    let resp = client
+        .get(url)
+        .send()
+        .await
+        .with_context(|| format!("failed to fetch threat feed from {url}"))?;
+
+    if !resp.status().is_success() {
+        return Err(anyhow!(
+            "threat feed endpoint returned HTTP {} for {}",
+            resp.status(),
+            url
+        ));
+    }
+
+    let indicators: Vec<scoring::network_risk::Indicator> = resp
+        .json()
+        .await
+        .with_context(|| format!("failed to parse threat feed payload from {url}"))?;
 
     Ok(ThreatFeed::from_indicators(indicators))
 }

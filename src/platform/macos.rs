@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use std::net::IpAddr;
 use tokio::process::Command;
+use tracing::warn;
 
 use crate::scoring::{
     device_quantity::EnrolledDevice,
@@ -27,11 +28,13 @@ pub struct MacOsGeoProvider;
 #[async_trait]
 impl GeoProvider for MacOsGeoProvider {
     async fn current_reading(&self) -> Result<GeoReading> {
-        // In a production binary this would drive the CoreLocation manager via
-        // objc2-core-location FFI.  For the initial implementation we return a
-        // GeoIP fallback so the agent can still operate without a location
-        // entitlement in development builds.
-        geoip_fallback().await
+        match corelocation_reading().await {
+            Ok(r) => Ok(r),
+            Err(e) => {
+                warn!("CoreLocation unavailable ({}), falling back to GeoIP", e);
+                geoip_fallback().await
+            }
+        }
     }
 }
 
@@ -79,6 +82,9 @@ impl DeviceRegistry for HttpDeviceRegistry {
             .send()
             .await
             .map_err(|e| anyhow!("device registry request failed: {}", e))?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("device registry HTTP {}", resp.status()));
+        }
         let devices: Vec<EnrolledDevice> = resp
             .json()
             .await
@@ -115,6 +121,110 @@ async fn geoip_fallback() -> Result<GeoReading> {
         source: GeoSource::GeoIP,
         timestamp: Utc::now(),
     })
+}
+
+/// Attempt to retrieve location from CoreLocation by invoking the system Swift runtime.
+///
+/// This avoids requiring a long-lived Objective-C delegate inside the Rust process while still
+/// using the native CoreLocation framework.
+async fn corelocation_reading() -> Result<GeoReading> {
+    let swift_script = r#"
+import Foundation
+import CoreLocation
+
+final class LocationDelegate: NSObject, CLLocationManagerDelegate {
+    let semaphore = DispatchSemaphore(value: 0)
+    var latitude: Double?
+    var longitude: Double?
+    var accuracy: Double?
+    var errorMessage: String?
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        if let loc = locations.last {
+            latitude = loc.coordinate.latitude
+            longitude = loc.coordinate.longitude
+            accuracy = loc.horizontalAccuracy
+            semaphore.signal()
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        errorMessage = error.localizedDescription
+        semaphore.signal()
+    }
+}
+
+if !CLLocationManager.locationServicesEnabled() {
+    fputs("location services disabled\n", stderr)
+    exit(2)
+}
+
+let manager = CLLocationManager()
+let delegate = LocationDelegate()
+manager.delegate = delegate
+manager.desiredAccuracy = kCLLocationAccuracyBest
+manager.requestWhenInUseAuthorization()
+manager.requestLocation()
+
+let timeout = DispatchTime.now() + .seconds(8)
+if delegate.semaphore.wait(timeout: timeout) == .success,
+   let lat = delegate.latitude,
+   let lon = delegate.longitude,
+   let acc = delegate.accuracy {
+    print("\(lat),\(lon),\(acc)")
+} else {
+    if let msg = delegate.errorMessage {
+        fputs("\(msg)\n", stderr)
+    } else {
+        fputs("location timeout\n", stderr)
+    }
+    exit(3)
+}
+"#;
+
+    let output = Command::new("swift")
+        .args(["-e", swift_script])
+        .output()
+        .await
+        .map_err(|e| anyhow!("failed to execute swift CoreLocation probe: {}", e))?;
+
+    if !output.status.success() {
+        return Err(anyhow!(
+            "CoreLocation probe failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let (lat, lon, acc) = parse_csv_triplet(stdout.trim())?;
+
+    Ok(GeoReading {
+        lat,
+        lon,
+        accuracy_meters: acc.max(0.0),
+        source: GeoSource::CoreLocation,
+        timestamp: Utc::now(),
+    })
+}
+
+fn parse_csv_triplet(s: &str) -> Result<(f64, f64, f32)> {
+    let mut it = s.split(',').map(str::trim);
+    let lat = it
+        .next()
+        .ok_or_else(|| anyhow!("missing latitude in CoreLocation output"))?
+        .parse::<f64>()
+        .map_err(|e| anyhow!("invalid latitude in CoreLocation output: {}", e))?;
+    let lon = it
+        .next()
+        .ok_or_else(|| anyhow!("missing longitude in CoreLocation output"))?
+        .parse::<f64>()
+        .map_err(|e| anyhow!("invalid longitude in CoreLocation output: {}", e))?;
+    let acc = it
+        .next()
+        .ok_or_else(|| anyhow!("missing accuracy in CoreLocation output"))?
+        .parse::<f32>()
+        .map_err(|e| anyhow!("invalid accuracy in CoreLocation output: {}", e))?;
+    Ok((lat, lon, acc))
 }
 
 fn parse_netstat_output(stdout: &str) -> Vec<NetworkConnection> {
