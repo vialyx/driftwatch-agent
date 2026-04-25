@@ -298,29 +298,17 @@ fn identity_id() -> String {
         .unwrap_or_else(|_| "unknown@domain.com".to_string())
 }
 
-/// Retrieve or generate the HMAC signing key.
+/// Generate cryptographically random bytes for the signing key using the OS CSPRNG.
+///
+/// This path only runs once on first start when the keychain is unavailable.
+/// The generated key is immediately stored in the keychain for subsequent runs.
 fn get_or_create_signing_key() -> Vec<u8> {
     keychain::get_secret("driftwatch", "signing-key").unwrap_or_else(|_| {
-        let key: Vec<u8> = (0..32).map(|_| rand_byte()).collect();
+        let mut key = vec![0u8; 32];
+        getrandom::getrandom(&mut key).expect("OS CSPRNG unavailable");
         let _ = keychain::set_secret("driftwatch", "signing-key", &key);
         key
     })
-}
-
-/// Cryptographically-acceptable random byte using the OS CSPRNG.
-fn rand_byte() -> u8 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    use std::time::SystemTime;
-
-    // Fallback entropy mix: XOR of thread ID, PID, and nanosecond timestamp.
-    // In production the keychain-bound key is generated once and stored;
-    // this path only runs if the keychain is unavailable.
-    let mut h = DefaultHasher::new();
-    SystemTime::now().hash(&mut h);
-    std::thread::current().id().hash(&mut h);
-    std::process::id().hash(&mut h);
-    (h.finish() & 0xFF) as u8
 }
 
 /// Return a fallback geo reading (max risk) when the provider fails.

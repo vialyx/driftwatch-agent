@@ -348,7 +348,10 @@ fn composite_weight_arithmetic() {
 
 #[test]
 fn composite_clamps_above_one() {
-    // Shouldn't happen with valid inputs, but verify the clamp is in place.
+    // Deliberately uses weights that sum > 1.0 to exercise the clamp guard
+    // in `compute_composite`.  Config validation would reject these weights
+    // at startup in production, but the arithmetic clamp is an independent
+    // safety net.
     let w = Weights {
         geo_anchor: 0.60,
         network_destination: 0.60,

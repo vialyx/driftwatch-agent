@@ -132,8 +132,8 @@ fn parse_hex_addr(addr: &str, is_v6: bool) -> Option<IpAddr> {
     let hex_ip = parts.first()?;
 
     if is_v6 {
-        // 128-bit little-endian in four 32-bit words
-        if hex_ip.len() < 32 {
+        // 128-bit little-endian in four 32-bit words — must be exactly 32 hex chars.
+        if hex_ip.len() != 32 {
             return None;
         }
         let mut bytes = [0u8; 16];
