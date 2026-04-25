@@ -1,0 +1,22 @@
+[agent]
+poll_interval_secs = 30
+log_level = "info"
+telemetry_endpoint = "https://risk-engine.internal/v1/events"
+
+[geo_anchor]
+anchor_radius_meters = 500.0
+trusted_anchors = [
+  { name = "HQ", lat = 39.6138, lon = -105.0166 },
+  { name = "Home Office", lat = 39.5500, lon = -104.9850 },
+]
+weight = 0.40
+
+[network_risk]
+threat_feed_url = "https://threatfeed.internal/v1/indicators"
+refresh_interval_secs = 300
+weight = 0.35
+
+[device_quantity]
+max_trusted_devices = 3
+identity_registry_url = "https://idp.internal/v1/devices"
+weight = 0.25

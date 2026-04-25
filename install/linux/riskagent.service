@@ -1,0 +1,36 @@
+[Unit]
+Description=Driftwatch Device Risk Scoring Agent
+Documentation=https://github.com/vialyx/driftwatch-agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/driftwatch-agent
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=driftwatch-agent
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+
+# Allow writing the IPC socket and queue DB
+ReadWritePaths=/var/run /var/lib/driftwatch-agent
+
+[Install]
+WantedBy=multi-user.target
