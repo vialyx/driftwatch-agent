@@ -1,0 +1,67 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        rust: [stable, beta]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      
+      - uses: Swatinem/rust-cache@v2
+      
+      - name: Run tests (lib)
+        run: cargo test --lib --verbose
+      
+      - name: Run tests (integration)
+        run: cargo test --test '*' --verbose
+      
+      - name: Run doc tests
+        run: cargo test --doc --verbose
+
+  test-msrv:
+    name: Test MSRV (1.70)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.70
+      
+      - uses: Swatinem/rust-cache@v2
+      
+      - name: Run tests
+        run: cargo test --lib --verbose
+
+  test-all-features:
+    name: Test All Features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+      
+      - uses: Swatinem/rust-cache@v2
+      
+      - name: Run all tests with all features
+        run: cargo test --all-features --verbose

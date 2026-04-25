@@ -52,3 +52,21 @@ zbus = { version = "4", default-features = false, features = ["tokio"] }
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 approx = "0.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+tempfile = "3"
+
+[[bench]]
+name = "scoring_benches"
+harness = false
+
+[[bench]]
+name = "geo_benches"
+harness = false
+
+[[bench]]
+name = "network_benches"
+harness = false
+
+[[bench]]
+name = "telemetry_benches"
+harness = false

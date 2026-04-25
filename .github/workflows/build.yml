@@ -1,0 +1,81 @@
+name: Build
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary_name: driftwatch-agent
+            artifact_name: driftwatch-agent-linux-x86_64
+          
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary_name: driftwatch-agent
+            artifact_name: driftwatch-agent-linux-aarch64
+          
+          # macOS builds
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary_name: driftwatch-agent
+            artifact_name: driftwatch-agent-macos-x86_64
+          
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary_name: driftwatch-agent
+            artifact_name: driftwatch-agent-macos-aarch64
+          
+          # Windows builds
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary_name: driftwatch-agent.exe
+            artifact_name: driftwatch-agent-windows-x86_64.exe
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      
+      - uses: Swatinem/rust-cache@v2
+      
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} --verbose
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: target/${{ matrix.target }}/release/${{ matrix.binary_name }}
+          retention-days: 5
+
+  build-lib:
+    name: Build Library
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - uses: Swatinem/rust-cache@v2
+      
+      - name: Build library
+        run: cargo build --release --lib --verbose
+      
+      - name: Build documentation
+        run: cargo doc --release --no-deps --all-features --verbose

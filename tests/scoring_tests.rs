@@ -83,7 +83,11 @@ fn geo_at_anchor_zero_score() {
     let hq = anchor("HQ", 39.6138, -105.0166);
     let reading = geo_reading(39.6138, -105.0166, 10.0);
     let score = score_geo_anchor(&reading, &[hq]);
-    assert!(score < 0.01, "at anchor → score should be ~0, got {}", score);
+    assert!(
+        score < 0.01,
+        "at anchor → score should be ~0, got {}",
+        score
+    );
 }
 
 #[test]
@@ -177,8 +181,9 @@ fn network_single_malicious_connection_drives_high_score() {
         risk: DestinationRisk::Malicious,
     }]);
     // 9 unknown + 1 malicious → 90th pct = 1.0
-    let mut conns: Vec<NetworkConnection> =
-        (1..10).map(|i| tcp_conn(ip(&format!("10.0.0.{}", i)), None)).collect();
+    let mut conns: Vec<NetworkConnection> = (1..10)
+        .map(|i| tcp_conn(ip(&format!("10.0.0.{}", i)), None))
+        .collect();
     conns.push(tcp_conn(ip("192.168.0.1"), None));
     let score = score_network_risk(&conns, &feed);
     assert!(
@@ -208,7 +213,11 @@ fn network_hostname_match() {
     }]);
     let conns = vec![tcp_conn(ip("5.5.5.5"), Some("bad.example.com"))];
     let score = score_network_risk(&conns, &feed);
-    assert!((score - 0.6).abs() < 1e-5, "suspicious → 0.6, got {}", score);
+    assert!(
+        (score - 0.6).abs() < 1e-5,
+        "suspicious → 0.6, got {}",
+        score
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -239,11 +248,7 @@ fn device_ten_over_max_returns_high_score() {
     // active=13 (max=3) → excess=10 → ln(10)/ln(10)=1.0
     let devices: Vec<_> = (0..13).map(|_| active_device()).collect();
     let score = score_device_quantity(&devices, 3);
-    assert!(
-        (score - 1.0).abs() < 1e-5,
-        "excess=10 → 1.0, got {}",
-        score
-    );
+    assert!((score - 1.0).abs() < 1e-5, "excess=10 → 1.0, got {}", score);
 }
 
 #[test]

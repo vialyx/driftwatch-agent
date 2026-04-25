@@ -53,10 +53,7 @@ pub async fn serve(state: Arc<IpcState>) -> Result<()> {
     }
 }
 
-async fn handle_connection(
-    stream: tokio::net::UnixStream,
-    state: Arc<IpcState>,
-) -> Result<()> {
+async fn handle_connection(stream: tokio::net::UnixStream, state: Arc<IpcState>) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
 

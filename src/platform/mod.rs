@@ -2,9 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::scoring::{
-    device_quantity::EnrolledDevice,
-    geo_anchor::GeoReading,
-    network_risk::NetworkConnection,
+    device_quantity::EnrolledDevice, geo_anchor::GeoReading, network_risk::NetworkConnection,
 };
 
 /// Abstraction over platform-specific geo-location providers.
@@ -27,12 +25,12 @@ pub trait DeviceRegistry: Send + Sync {
 
 // Pull in the platform-specific implementations so they are compiled
 // and their types are accessible without having to name the module explicitly.
+#[cfg(target_os = "linux")]
+pub mod linux;
 #[cfg(target_os = "macos")]
 pub mod macos;
 #[cfg(target_os = "windows")]
 pub mod windows;
-#[cfg(target_os = "linux")]
-pub mod linux;
 
 // Expose a fallback stub on any platform not yet fully implemented
 // (useful for CI that runs on the build host).

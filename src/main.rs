@@ -61,8 +61,7 @@ async fn main() -> Result<()> {
         std::process::exit(1);
     });
 
-    let device_registry: Arc<dyn DeviceRegistry> =
-        build_device_registry(&cfg, identity_id.clone());
+    let device_registry: Arc<dyn DeviceRegistry> = build_device_registry(&cfg, identity_id.clone());
 
     // IPC state shared between the polling loop and the IPC server.
     let (force_refresh_tx, mut force_refresh_rx) = tokio::sync::watch::channel(());
@@ -162,11 +161,7 @@ async fn main() -> Result<()> {
 
         info!(
             "Risk score: composite={:.3} level={} (geo={:.3}, net={:.3}, dev={:.3})",
-            risk_score.composite,
-            risk_score.level,
-            geo_score,
-            network_score,
-            device_score
+            risk_score.composite, risk_score.level, geo_score, network_score, device_score
         );
 
         // Count malicious connections for telemetry meta.

@@ -89,8 +89,7 @@ impl NetworkMonitor for LinuxNetworkMonitor {
 /// Parse a `/proc/net/tcp` or `/proc/net/tcp6` file and return connections
 /// that are in the `ESTABLISHED` state (state code `01` hex = 1 decimal).
 fn parse_proc_net_tcp(path: &str, is_v6: bool) -> Result<Vec<NetworkConnection>> {
-    let content = fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path))?;
+    let content = fs::read_to_string(path).with_context(|| format!("failed to read {}", path))?;
 
     let mut conns = Vec::new();
     for line in content.lines().skip(1) {

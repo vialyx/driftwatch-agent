@@ -132,8 +132,8 @@ impl TelemetryEmitter {
 
     /// Sign a JSON payload and return the hex-encoded HMAC-SHA256.
     pub fn sign(&self, payload: &str) -> String {
-        let mut mac = HmacSha256::new_from_slice(&self.signing_key)
-            .expect("HMAC accepts any key length");
+        let mut mac =
+            HmacSha256::new_from_slice(&self.signing_key).expect("HMAC accepts any key length");
         mac.update(payload.as_bytes());
         hex::encode(mac.finalize().into_bytes())
     }
@@ -188,8 +188,7 @@ impl TelemetryEmitter {
             match self.send_with_retry(&payload, &sig, 1).await {
                 Ok(()) => {
                     let conn = self.queue.lock().expect("queue mutex poisoned");
-                    let _ = conn
-                        .execute("DELETE FROM event_queue WHERE id = ?1", params![id]);
+                    let _ = conn.execute("DELETE FROM event_queue WHERE id = ?1", params![id]);
                 }
                 Err(_) => {
                     let conn = self.queue.lock().expect("queue mutex poisoned");
@@ -235,7 +234,7 @@ impl TelemetryEmitter {
         Err(last_err)
     }
 
-    fn enqueue(&self, payload: &str) -> Result<()> {
+    pub fn enqueue(&self, payload: &str) -> Result<()> {
         let conn = self.queue.lock().expect("queue mutex poisoned");
         conn.execute(
             "INSERT INTO event_queue (payload, queued_at) VALUES (?1, ?2)",

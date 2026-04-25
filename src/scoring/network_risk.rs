@@ -78,14 +78,14 @@ pub fn score_network_risk(connections: &[NetworkConnection], feed: &ThreatFeed) 
 
     let mut scores: Vec<f32> = connections
         .iter()
-        .map(|conn| {
-            match feed.classify(&conn.remote_ip, conn.remote_hostname.as_deref()) {
+        .map(
+            |conn| match feed.classify(&conn.remote_ip, conn.remote_hostname.as_deref()) {
                 DestinationRisk::Trusted => 0.0,
                 DestinationRisk::Unknown => 0.2,
                 DestinationRisk::Suspicious => 0.6,
                 DestinationRisk::Malicious => 1.0,
-            }
-        })
+            },
+        )
         .collect();
 
     percentile_90(&mut scores)
@@ -163,11 +163,7 @@ mod tests {
             .collect();
         conns.push(conn(ip("10.0.0.1"), None));
         let score = score_network_risk(&conns, &feed);
-        assert!(
-            (score - 1.0).abs() < 1e-5,
-            "expected 1.0, got {}",
-            score
-        );
+        assert!((score - 1.0).abs() < 1e-5, "expected 1.0, got {}", score);
     }
 
     #[test]

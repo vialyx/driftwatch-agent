@@ -1,0 +1,45 @@
+name: Benchmarks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    name: Run Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - uses: Swatinem/rust-cache@v2
+      
+      - name: Run benchmarks
+        run: cargo bench --no-run
+      
+      - name: Run scoring benchmarks
+        run: cargo bench --bench scoring_benches -- --output-format bencher | tee output.txt
+      
+      - name: Run geo benchmarks
+        run: cargo bench --bench geo_benches -- --output-format bencher | tee -a output.txt
+      
+      - name: Run network benchmarks
+        run: cargo bench --bench network_benches -- --output-format bencher | tee -a output.txt
+      
+      - name: Run telemetry benchmarks
+        run: cargo bench --bench telemetry_benches -- --output-format bencher | tee -a output.txt
+      
+      - name: Store benchmark result
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          tool: 'cargo'
+          output-file-path: output.txt
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          auto-push: false
+        continue-on-error: true

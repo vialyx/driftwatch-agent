@@ -34,8 +34,7 @@ pub fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     let lat1_r = lat1.to_radians();
     let lat2_r = lat2.to_radians();
 
-    let a = (d_lat / 2.0).sin().powi(2)
-        + lat1_r.cos() * lat2_r.cos() * (d_lon / 2.0).sin().powi(2);
+    let a = (d_lat / 2.0).sin().powi(2) + lat1_r.cos() * lat2_r.cos() * (d_lon / 2.0).sin().powi(2);
     let c = 2.0 * a.sqrt().asin();
     EARTH_RADIUS_M * c
 }
@@ -59,7 +58,11 @@ pub fn score_geo_anchor(reading: &GeoReading, anchors: &[Anchor]) -> f32 {
     let raw = (min_distance / 5_000.0).clamp(0.0, 1.0) as f32;
 
     // Penalise low-accuracy readings.
-    let accuracy_penalty = if reading.accuracy_meters > 200.0 { 0.1 } else { 0.0 };
+    let accuracy_penalty = if reading.accuracy_meters > 200.0 {
+        0.1
+    } else {
+        0.0
+    };
 
     (raw + accuracy_penalty).clamp(0.0, 1.0)
 }
@@ -148,10 +151,6 @@ mod tests {
         // Denver to New York ≈ 2_620 km
         let d = haversine_distance(39.7392, -104.9903, 40.7128, -74.0060);
         let km = d / 1_000.0;
-        assert!(
-            (km - 2620.0).abs() < 50.0,
-            "unexpected distance {} km",
-            km
-        );
+        assert!((km - 2620.0).abs() < 50.0, "unexpected distance {} km", km);
     }
 }

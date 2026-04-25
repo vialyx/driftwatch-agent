@@ -105,10 +105,19 @@ mod tests {
             device_quantity: 0.0,
         };
         assert_eq!(compute_composite(0.29, 0.0, 0.0, &w).level, RiskLevel::Low);
-        assert_eq!(compute_composite(0.30, 0.0, 0.0, &w).level, RiskLevel::Medium);
-        assert_eq!(compute_composite(0.59, 0.0, 0.0, &w).level, RiskLevel::Medium);
+        assert_eq!(
+            compute_composite(0.30, 0.0, 0.0, &w).level,
+            RiskLevel::Medium
+        );
+        assert_eq!(
+            compute_composite(0.59, 0.0, 0.0, &w).level,
+            RiskLevel::Medium
+        );
         assert_eq!(compute_composite(0.60, 0.0, 0.0, &w).level, RiskLevel::High);
         assert_eq!(compute_composite(0.79, 0.0, 0.0, &w).level, RiskLevel::High);
-        assert_eq!(compute_composite(0.80, 0.0, 0.0, &w).level, RiskLevel::Critical);
+        assert_eq!(
+            compute_composite(0.80, 0.0, 0.0, &w).level,
+            RiskLevel::Critical
+        );
     }
 }

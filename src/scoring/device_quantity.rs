@@ -25,10 +25,7 @@ pub struct EnrolledDevice {
 /// last 30 days. Returns a value in `[0.0, 1.0]`.
 pub fn score_device_quantity(devices: &[EnrolledDevice], max_trusted: usize) -> f32 {
     let cutoff = Utc::now() - Duration::days(30);
-    let active = devices
-        .iter()
-        .filter(|d| d.last_seen > cutoff)
-        .count();
+    let active = devices.iter().filter(|d| d.last_seen > cutoff).count();
 
     if active <= max_trusted {
         return 0.0;

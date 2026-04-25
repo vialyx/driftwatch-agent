@@ -98,7 +98,9 @@ impl IpcState {
 }
 
 pub fn parse_authenticated_request(line: &str) -> Result<AuthenticatedIpcRequest> {
-    Ok(serde_json::from_str::<AuthenticatedIpcRequest>(line.trim())?)
+    Ok(serde_json::from_str::<AuthenticatedIpcRequest>(
+        line.trim(),
+    )?)
 }
 
 pub fn constant_time_eq(a: &str, b: &str) -> bool {
@@ -121,5 +123,149 @@ pub async fn serve(state: std::sync::Arc<IpcState>) -> Result<()> {
     #[cfg(not(target_os = "windows"))]
     {
         unix::serve(state).await
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    #[test]
+    fn test_response_success() {
+        let resp = IpcResponse::success("test_data");
+        assert!(resp.ok);
+        assert_eq!(resp.data, Some("test_data"));
+        assert_eq!(resp.error, None);
+    }
+
+    #[test]
+    fn test_response_error() {
+        let resp = IpcResponse::<String>::error("error message");
+        assert!(!resp.ok);
+        assert_eq!(resp.data, None);
+        assert_eq!(resp.error, Some("error message".to_string()));
+    }
+
+    #[test]
+    fn test_parse_get_current_request() {
+        let json = r#"{"token": "auth_token", "method": "GET /risk/current"}"#;
+        let req = parse_authenticated_request(json);
+        assert!(req.is_ok());
+        let req = req.unwrap();
+        assert_eq!(req.token, "auth_token");
+        match req.request {
+            IpcRequest::GetCurrent => {}
+            _ => panic!("Expected GetCurrent"),
+        }
+    }
+
+    #[test]
+    fn test_parse_get_history_request() {
+        let json = r#"{"token": "auth_token", "method": "GET /risk/history", "n": 10}"#;
+        let req = parse_authenticated_request(json);
+        assert!(req.is_ok());
+        let req = req.unwrap();
+        assert_eq!(req.token, "auth_token");
+        match req.request {
+            IpcRequest::GetHistory { n } => assert_eq!(n, 10),
+            _ => panic!("Expected GetHistory"),
+        }
+    }
+
+    #[test]
+    fn test_parse_force_refresh_request() {
+        let json = r#"{"token": "auth_token", "method": "POST /risk/force-refresh"}"#;
+        let req = parse_authenticated_request(json);
+        assert!(req.is_ok());
+        let req = req.unwrap();
+        assert_eq!(req.token, "auth_token");
+        match req.request {
+            IpcRequest::ForceRefresh => {}
+            _ => panic!("Expected ForceRefresh"),
+        }
+    }
+
+    #[test]
+    fn test_constant_time_eq_equal_strings() {
+        assert!(constant_time_eq("token123", "token123"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_different_strings() {
+        assert!(!constant_time_eq("token123", "token456"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_different_lengths() {
+        assert!(!constant_time_eq("token123", "token"));
+    }
+
+    #[test]
+    fn test_constant_time_eq_empty_strings() {
+        assert!(constant_time_eq("", ""));
+    }
+
+    #[test]
+    fn test_constant_time_eq_empty_vs_nonempty() {
+        assert!(!constant_time_eq("", "token"));
+    }
+
+    #[tokio::test]
+    async fn test_ipc_state_creation() {
+        let (tx, _rx) = tokio::sync::watch::channel(());
+        let state = IpcState::new(tx, "test_token".to_string(), 100);
+        assert_eq!(state.auth_token, "test_token");
+        assert_eq!(state.history_limit, 100);
+    }
+
+    #[tokio::test]
+    async fn test_ipc_state_push_score() {
+        let (tx, _rx) = tokio::sync::watch::channel(());
+        let state = IpcState::new(tx, "test_token".to_string(), 10);
+
+        let score = crate::scoring::RiskScore {
+            composite: 0.5,
+            geo_anchor: 0.4,
+            network_destination: 0.5,
+            device_quantity: 0.6,
+            level: crate::scoring::RiskLevel::Medium,
+            computed_at: Utc::now(),
+            signals_version: "0.1.0".to_string(),
+        };
+
+        state.push_score(score.clone()).await;
+
+        let latest = state.latest_score.read().await;
+        assert!(latest.is_some());
+        assert_eq!(latest.as_ref().unwrap().composite, 0.5);
+    }
+
+    #[tokio::test]
+    async fn test_ipc_state_history_limit() {
+        let (tx, _rx) = tokio::sync::watch::channel(());
+        let state = IpcState::new(tx, "test_token".to_string(), 3);
+
+        for i in 0..5 {
+            let score = crate::scoring::RiskScore {
+                composite: i as f32 * 0.1,
+                geo_anchor: 0.0,
+                network_destination: 0.0,
+                device_quantity: 0.0,
+                level: crate::scoring::RiskLevel::Low,
+                computed_at: Utc::now(),
+                signals_version: "0.1.0".to_string(),
+            };
+            state.push_score(score).await;
+        }
+
+        let history = state.history.read().await;
+        assert!(history.len() <= 3);
+    }
+
+    #[test]
+    fn test_invalid_json_request() {
+        let json = r#"{"invalid": "json"}"#;
+        let req = parse_authenticated_request(json);
+        assert!(req.is_err());
     }
 }
