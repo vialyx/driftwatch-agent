@@ -7,14 +7,15 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::UnixListener,
 };
 use tracing::{error, info};
 
-use super::IpcState;
-use crate::scoring::RiskScore;
+use super::{constant_time_eq, parse_authenticated_request, IpcRequest, IpcState};
 
 /// Path of the Unix domain socket.
 pub const SOCKET_PATH: &str = "/var/run/riskagent.sock";
@@ -24,7 +25,15 @@ pub async fn serve(state: Arc<IpcState>) -> Result<()> {
     // Remove stale socket file from a previous run.
     let _ = std::fs::remove_file(SOCKET_PATH);
 
+    if let Some(parent) = std::path::Path::new(SOCKET_PATH).parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
     let listener = UnixListener::bind(SOCKET_PATH)?;
+    #[cfg(unix)]
+    {
+        std::fs::set_permissions(SOCKET_PATH, std::fs::Permissions::from_mode(0o600))?;
+    }
     info!("IPC listening on {}", SOCKET_PATH);
 
     loop {
@@ -66,9 +75,24 @@ async fn handle_connection(
 }
 
 async fn dispatch(request: &str, state: &IpcState) -> String {
-    // Simple line-based protocol: the request line is the path.
-    match request {
-        "GET /risk/current" => {
+    let parsed = match parse_authenticated_request(request) {
+        Ok(r) => r,
+        Err(e) => {
+            return serde_json::to_string(&super::IpcResponse::<()>::error(format!(
+                "invalid request: {}",
+                e
+            )))
+            .unwrap_or_default();
+        }
+    };
+
+    if !constant_time_eq(&parsed.token, &state.auth_token) {
+        return serde_json::to_string(&super::IpcResponse::<()>::error("unauthorized"))
+            .unwrap_or_default();
+    }
+
+    match parsed.request {
+        IpcRequest::GetCurrent => {
             let guard = state.latest_score.read().await;
             match &*guard {
                 Some(score) => serde_json::to_string(&super::IpcResponse::success(score))
@@ -77,22 +101,22 @@ async fn dispatch(request: &str, state: &IpcState) -> String {
                     .unwrap_or_default(),
             }
         }
-        s if s.starts_with("GET /risk/history") => {
-            // Simplified: return latest score in a list (full history requires DB query)
-            let guard = state.latest_score.read().await;
-            let scores: Vec<&RiskScore> = guard.iter().collect();
+        IpcRequest::GetHistory { n } => {
+            let history = state.history.read().await;
+            let take_n = n.max(1).min(state.history_limit);
+            let scores = history
+                .iter()
+                .rev()
+                .take(take_n)
+                .cloned()
+                .collect::<Vec<_>>();
             serde_json::to_string(&super::IpcResponse::success(scores))
                 .unwrap_or_else(|e| format!(r#"{{"ok":false,"error":"{}"}}"#, e))
         }
-        "POST /risk/force-refresh" => {
+        IpcRequest::ForceRefresh => {
             let _ = state.force_refresh_tx.send(());
             serde_json::to_string(&super::IpcResponse::success("refresh triggered"))
                 .unwrap_or_default()
         }
-        other => serde_json::to_string(&super::IpcResponse::<()>::error(format!(
-            "unknown request: {}",
-            other
-        )))
-        .unwrap_or_default(),
     }
 }

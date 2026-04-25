@@ -51,12 +51,12 @@ async fn geoip_fallback() -> Result<GeoReading> {
 
     #[derive(serde::Deserialize)]
     struct IpApiResponse {
-        lat: f64,
-        lon: f64,
+        latitude: f64,
+        longitude: f64,
     }
 
     let resp: IpApiResponse = client
-        .get("http://ip-api.com/json?fields=lat,lon")
+        .get("https://ipapi.co/json/")
         .send()
         .await
         .map_err(|e| anyhow!("GeoIP request failed: {}", e))?
@@ -65,8 +65,8 @@ async fn geoip_fallback() -> Result<GeoReading> {
         .map_err(|e| anyhow!("GeoIP parse failed: {}", e))?;
 
     Ok(GeoReading {
-        lat: resp.lat,
-        lon: resp.lon,
+        lat: resp.latitude,
+        lon: resp.longitude,
         accuracy_meters: 5_000.0,
         source: GeoSource::GeoIP,
         timestamp: Utc::now(),
@@ -87,7 +87,7 @@ impl NetworkMonitor for LinuxNetworkMonitor {
 }
 
 /// Parse a `/proc/net/tcp` or `/proc/net/tcp6` file and return connections
-/// that are in the `ESTABLISHED` state (state code `0A` hex = 10 decimal).
+/// that are in the `ESTABLISHED` state (state code `01` hex = 1 decimal).
 fn parse_proc_net_tcp(path: &str, is_v6: bool) -> Result<Vec<NetworkConnection>> {
     let content = fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path))?;
@@ -98,9 +98,9 @@ fn parse_proc_net_tcp(path: &str, is_v6: bool) -> Result<Vec<NetworkConnection>>
         if fields.len() < 4 {
             continue;
         }
-        // Field 3 is the connection state; 0A = ESTABLISHED
+        // Field 3 is the connection state; 01 = ESTABLISHED
         let state = fields[3];
-        if state != "0A" {
+        if state != "01" {
             continue;
         }
 
@@ -173,6 +173,9 @@ impl DeviceRegistry for HttpDeviceRegistry {
             .send()
             .await
             .map_err(|e| anyhow!("device registry request failed: {}", e))?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("device registry HTTP {}", resp.status()));
+        }
         let devices: Vec<EnrolledDevice> = resp
             .json()
             .await

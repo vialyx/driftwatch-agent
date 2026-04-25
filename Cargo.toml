@@ -3,7 +3,7 @@ name = "driftwatch-agent"
 version = "0.1.0"
 edition = "2021"
 description = "Cross-platform device risk scoring agent"
-license = "MIT"
+license = "Apache-2.0"
 
 [lib]
 name = "driftwatch_agent"
@@ -32,6 +32,8 @@ thiserror = "1"
 anyhow = "1"
 async-trait = "0.1"
 tokio-stream = "0.1"
+keyring = "3"
+base64 = "0.22"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"

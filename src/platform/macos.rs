@@ -7,6 +7,8 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use chrono::Utc;
+use std::net::IpAddr;
+use tokio::process::Command;
 
 use crate::scoring::{
     device_quantity::EnrolledDevice,
@@ -40,8 +42,22 @@ pub struct MacOsNetworkMonitor;
 #[async_trait]
 impl NetworkMonitor for MacOsNetworkMonitor {
     async fn active_connections(&self) -> Result<Vec<NetworkConnection>> {
-        // TODO: implement via NEPacketTunnelProvider / system extension
-        Ok(vec![])
+        // Uses `netstat` parsing as a capability-free baseline.
+        let output = Command::new("netstat")
+            .args(["-an", "-p", "tcp"])
+            .output()
+            .await
+            .map_err(|e| anyhow!("failed to execute netstat: {}", e))?;
+
+        if !output.status.success() {
+            return Err(anyhow!(
+                "netstat returned non-zero exit status: {}",
+                output.status
+            ));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(parse_netstat_output(&stdout))
     }
 }
 
@@ -79,12 +95,12 @@ async fn geoip_fallback() -> Result<GeoReading> {
 
     #[derive(serde::Deserialize)]
     struct IpApiResponse {
-        lat: f64,
-        lon: f64,
+        latitude: f64,
+        longitude: f64,
     }
 
     let resp: IpApiResponse = client
-        .get("http://ip-api.com/json?fields=lat,lon")
+        .get("https://ipapi.co/json/")
         .send()
         .await
         .map_err(|e| anyhow!("GeoIP request failed: {}", e))?
@@ -93,10 +109,54 @@ async fn geoip_fallback() -> Result<GeoReading> {
         .map_err(|e| anyhow!("GeoIP parse failed: {}", e))?;
 
     Ok(GeoReading {
-        lat: resp.lat,
-        lon: resp.lon,
+        lat: resp.latitude,
+        lon: resp.longitude,
         accuracy_meters: 5_000.0, // GeoIP is city-level at best
         source: GeoSource::GeoIP,
         timestamp: Utc::now(),
     })
+}
+
+fn parse_netstat_output(stdout: &str) -> Vec<NetworkConnection> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() < 6 {
+                return None;
+            }
+
+            let state = fields.last()?.to_ascii_uppercase();
+            if state != "ESTABLISHED" {
+                return None;
+            }
+
+            let remote = fields.get(4)?;
+            let (remote_ip, remote_port) = parse_remote_endpoint(remote)?;
+
+            Some(NetworkConnection {
+                remote_ip,
+                remote_port,
+                remote_hostname: None,
+                protocol: crate::scoring::network_risk::Protocol::Tcp,
+                process_name: None,
+                bytes_sent: 0,
+                established_at: Utc::now(),
+            })
+        })
+        .collect()
+}
+
+fn parse_remote_endpoint(endpoint: &str) -> Option<(IpAddr, u16)> {
+    if endpoint == "*.*" {
+        return None;
+    }
+
+    // IPv6 netstat format commonly uses `ip.port` and includes `::ffff:` mapped
+    // addresses. Splitting from the right works for both v4 and v6 here.
+    let (host, port_str) = endpoint.rsplit_once('.')?;
+    let port = port_str.parse::<u16>().ok()?;
+    let host = host.trim_start_matches("::ffff:");
+    let ip = host.parse::<IpAddr>().ok()?;
+    Some((ip, port))
 }

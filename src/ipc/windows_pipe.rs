@@ -13,8 +13,7 @@ use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{error, info};
 
-use super::IpcState;
-use crate::scoring::RiskScore;
+use super::{constant_time_eq, parse_authenticated_request, IpcRequest, IpcState};
 
 /// Named pipe path used on Windows.
 pub const PIPE_NAME: &str = r"\\.\pipe\riskagent";
@@ -68,8 +67,24 @@ async fn handle_connection(
 }
 
 async fn dispatch_request(request: &str, state: &IpcState) -> String {
-    match request {
-        "GET /risk/current" => {
+    let parsed = match parse_authenticated_request(request) {
+        Ok(r) => r,
+        Err(e) => {
+            return serde_json::to_string(&super::IpcResponse::<()>::error(format!(
+                "invalid request: {}",
+                e
+            )))
+            .unwrap_or_default();
+        }
+    };
+
+    if !constant_time_eq(&parsed.token, &state.auth_token) {
+        return serde_json::to_string(&super::IpcResponse::<()>::error("unauthorized"))
+            .unwrap_or_default();
+    }
+
+    match parsed.request {
+        IpcRequest::GetCurrent => {
             let guard = state.latest_score.read().await;
             match &*guard {
                 Some(score) => serde_json::to_string(&super::IpcResponse::success(score))
@@ -78,21 +93,22 @@ async fn dispatch_request(request: &str, state: &IpcState) -> String {
                     .unwrap_or_default(),
             }
         }
-        s if s.starts_with("GET /risk/history") => {
-            let guard = state.latest_score.read().await;
-            let scores: Vec<&RiskScore> = guard.iter().collect();
+        IpcRequest::GetHistory { n } => {
+            let history = state.history.read().await;
+            let take_n = n.max(1).min(state.history_limit);
+            let scores = history
+                .iter()
+                .rev()
+                .take(take_n)
+                .cloned()
+                .collect::<Vec<_>>();
             serde_json::to_string(&super::IpcResponse::success(scores))
                 .unwrap_or_else(|e| format!(r#"{{"ok":false,"error":"{}"}}"#, e))
         }
-        "POST /risk/force-refresh" => {
+        IpcRequest::ForceRefresh => {
             let _ = state.force_refresh_tx.send(());
             serde_json::to_string(&super::IpcResponse::success("refresh triggered"))
                 .unwrap_or_default()
         }
-        other => serde_json::to_string(&super::IpcResponse::<()>::error(format!(
-            "unknown request: {}",
-            other
-        )))
-        .unwrap_or_default(),
     }
 }

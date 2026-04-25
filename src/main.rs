@@ -10,8 +10,9 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use std::{path::PathBuf, str::FromStr};
 
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use tracing::{error, info, warn};
 
 mod config;
@@ -55,23 +56,38 @@ async fn main() -> Result<()> {
     // Build platform-appropriate providers.
     let geo_provider: Arc<dyn GeoProvider> = build_geo_provider();
     let network_monitor: Arc<dyn NetworkMonitor> = build_network_monitor();
-    let device_registry: Arc<dyn DeviceRegistry> = build_device_registry(&cfg);
+    let identity_id = get_identity_id().unwrap_or_else(|e| {
+        error!("Failed to resolve identity ID: {}", e);
+        std::process::exit(1);
+    });
+
+    let device_registry: Arc<dyn DeviceRegistry> =
+        build_device_registry(&cfg, identity_id.clone());
 
     // IPC state shared between the polling loop and the IPC server.
     let (force_refresh_tx, mut force_refresh_rx) = tokio::sync::watch::channel(());
-    let ipc_state = IpcState::new(force_refresh_tx);
+    let ipc_token = get_or_create_ipc_token().unwrap_or_else(|e| {
+        error!("Failed to initialize IPC auth token: {}", e);
+        std::process::exit(1);
+    });
+    let ipc_state = IpcState::new(force_refresh_tx, ipc_token, 1000);
 
     // Retrieve (or generate) the HMAC signing key from the platform keychain.
     let signing_key = get_or_create_signing_key();
 
     // Telemetry emitter with local SQLite queue.
+    let queue_db_path = state_dir().join("driftwatch_queue.db");
+    if let Some(parent) = queue_db_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
     let emitter = Arc::new(
         telemetry::TelemetryEmitter::new(
             cfg.agent.telemetry_endpoint.clone(),
             device_fingerprint(),
-            identity_id(),
+            identity_id.clone(),
             signing_key,
-            "driftwatch_queue.db",
+            queue_db_path.to_string_lossy().as_ref(),
         )
         .unwrap_or_else(|e| {
             error!("Failed to initialise telemetry emitter: {}", e);
@@ -165,10 +181,7 @@ async fn main() -> Result<()> {
             .count();
 
         // Publish latest score to IPC state.
-        {
-            let mut guard = ipc_state.latest_score.write().await;
-            *guard = Some(risk_score.clone());
-        }
+        ipc_state.push_score(risk_score.clone()).await;
 
         // Build and emit the telemetry event.
         let event = emitter.build_event(
@@ -239,20 +252,18 @@ fn build_network_monitor() -> Arc<dyn NetworkMonitor> {
     }
 }
 
-fn build_device_registry(cfg: &AgentConfig) -> Arc<dyn DeviceRegistry> {
+fn build_device_registry(cfg: &AgentConfig, identity_id: String) -> Arc<dyn DeviceRegistry> {
     // Use the HTTP registry; authentication token is fetched from the keychain.
     let token = keychain::get_secret("driftwatch", "registry-token")
         .map(|b| String::from_utf8_lossy(&b).to_string())
         .unwrap_or_default();
-
-    let identity_id = identity_id();
 
     #[cfg(target_os = "macos")]
     {
         Arc::new(platform::macos::HttpDeviceRegistry {
             endpoint: cfg.device_quantity.identity_registry_url.clone(),
             token,
-            identity_id,
+            identity_id: identity_id.clone(),
         })
     }
     #[cfg(target_os = "windows")]
@@ -260,7 +271,7 @@ fn build_device_registry(cfg: &AgentConfig) -> Arc<dyn DeviceRegistry> {
         Arc::new(platform::windows::HttpDeviceRegistry {
             endpoint: cfg.device_quantity.identity_registry_url.clone(),
             token,
-            identity_id,
+            identity_id: identity_id.clone(),
         })
     }
     #[cfg(target_os = "linux")]
@@ -268,7 +279,7 @@ fn build_device_registry(cfg: &AgentConfig) -> Arc<dyn DeviceRegistry> {
         Arc::new(platform::linux::HttpDeviceRegistry {
             endpoint: cfg.device_quantity.identity_registry_url.clone(),
             token,
-            identity_id,
+            identity_id: identity_id.clone(),
         })
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -292,10 +303,28 @@ fn device_fingerprint() -> String {
         })
 }
 
-/// Return the authenticated identity ID (from env or keychain).
-fn identity_id() -> String {
-    std::env::var("DRIFTWATCH_IDENTITY_ID")
-        .unwrap_or_else(|_| "unknown@domain.com".to_string())
+/// Return the authenticated identity ID from env/keychain.
+///
+/// Priority:
+/// 1. `DRIFTWATCH_IDENTITY_ID` (and persist to keychain)
+/// 2. previously persisted keychain value
+fn get_identity_id() -> Result<String> {
+    if let Ok(from_env) = std::env::var("DRIFTWATCH_IDENTITY_ID") {
+        let trimmed = from_env.trim();
+        if !trimmed.is_empty() {
+            let _ = keychain::set_secret("driftwatch", "identity-id", trimmed.as_bytes());
+            return Ok(trimmed.to_string());
+        }
+    }
+
+    let from_keychain = keychain::get_secret("driftwatch", "identity-id")
+        .context("identity id not found in keychain")?;
+    let id = String::from_utf8(from_keychain)
+        .map_err(|e| anyhow!("identity id in keychain is not valid UTF-8: {}", e))?;
+    if id.trim().is_empty() {
+        return Err(anyhow!("identity id is empty"));
+    }
+    Ok(id)
 }
 
 /// Generate cryptographically random bytes for the signing key using the OS CSPRNG.
@@ -305,10 +334,67 @@ fn identity_id() -> String {
 fn get_or_create_signing_key() -> Vec<u8> {
     keychain::get_secret("driftwatch", "signing-key").unwrap_or_else(|_| {
         let mut key = vec![0u8; 32];
-        getrandom::getrandom(&mut key).expect("OS CSPRNG unavailable");
+        if let Err(e) = getrandom::getrandom(&mut key) {
+            panic!("OS CSPRNG unavailable: {}", e);
+        }
         let _ = keychain::set_secret("driftwatch", "signing-key", &key);
         key
     })
+}
+
+/// Return or create a random token used to authenticate local IPC requests.
+fn get_or_create_ipc_token() -> Result<String> {
+    if let Ok(bytes) = keychain::get_secret("driftwatch", "ipc-token") {
+        let token = String::from_utf8(bytes)
+            .map_err(|e| anyhow!("IPC token in keychain is not valid UTF-8: {}", e))?;
+        if !token.trim().is_empty() {
+            return Ok(token);
+        }
+    }
+
+    let mut raw = [0u8; 32];
+    getrandom::getrandom(&mut raw)
+        .map_err(|e| anyhow!("OS CSPRNG unavailable for IPC token: {}", e))?;
+    let token = hex::encode(raw);
+    keychain::set_secret("driftwatch", "ipc-token", token.as_bytes())?;
+    Ok(token)
+}
+
+fn state_dir() -> PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(path) = std::env::var("DRIFTWATCH_STATE_DIR") {
+            return PathBuf::from(path);
+        }
+        return PathBuf::from("/var/lib/driftwatch-agent");
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(path) = std::env::var("DRIFTWATCH_STATE_DIR") {
+            return PathBuf::from(path);
+        }
+        if let Ok(home) = std::env::var("HOME") {
+            return PathBuf::from_str(&home)
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join("Library/Application Support/driftwatch-agent");
+        }
+        PathBuf::from("./driftwatch-agent")
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(path) = std::env::var("DRIFTWATCH_STATE_DIR") {
+            return PathBuf::from(path);
+        }
+        if let Ok(program_data) = std::env::var("PROGRAMDATA") {
+            return PathBuf::from(program_data).join("Driftwatch/Agent");
+        }
+        return PathBuf::from("C:/ProgramData/Driftwatch/Agent");
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    PathBuf::from("./driftwatch-agent")
 }
 
 /// Return a fallback geo reading (max risk) when the provider fails.

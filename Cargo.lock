@@ -440,11 +440,13 @@ dependencies = [
  "anyhow",
  "approx",
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "config",
  "getrandom 0.2.17",
  "hex",
  "hmac",
+ "keyring",
  "objc2",
  "objc2-core-location",
  "reqwest",
@@ -1098,6 +1100,16 @@ dependencies = [
  "pest",
  "pest_derive",
  "serde",
+]
+
+[[package]]
+name = "keyring"
+version = "3.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eebcc3aff044e5944a8fbaf69eb277d11986064cba30c468730e8b9909fb551c"
+dependencies = [
+ "log",
+ "zeroize",
 ]
 
 [[package]]
