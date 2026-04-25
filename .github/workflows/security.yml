@@ -57,6 +57,7 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v1
         with:
           log-level: warn
+          rust-version: 1.86.0
           command: check advisories
 
   outdated:
