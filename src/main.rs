@@ -55,9 +55,8 @@ async fn main() -> Result<()> {
     let network_monitor: Arc<dyn NetworkMonitor> = build_network_monitor();
     let identity_id = get_identity_id().context("failed to resolve identity ID")?;
 
-    let device_registry: Arc<dyn DeviceRegistry> =
-        build_device_registry(&cfg, identity_id.clone())
-            .context("failed to initialize device registry")?;
+    let device_registry: Arc<dyn DeviceRegistry> = build_device_registry(&cfg, identity_id.clone())
+        .context("failed to initialize device registry")?;
 
     // IPC state shared between the polling loop and the IPC server.
     let (force_refresh_tx, mut force_refresh_rx) = tokio::sync::watch::channel(());
@@ -245,7 +244,10 @@ fn build_network_monitor() -> Arc<dyn NetworkMonitor> {
     }
 }
 
-fn build_device_registry(cfg: &AgentConfig, identity_id: String) -> Result<Arc<dyn DeviceRegistry>> {
+fn build_device_registry(
+    cfg: &AgentConfig,
+    identity_id: String,
+) -> Result<Arc<dyn DeviceRegistry>> {
     // Use the HTTP registry; authentication token is fetched from the keychain.
     let token_bytes = keychain::get_secret("driftwatch", "registry-token")
         .context("registry token not found in keychain")?;

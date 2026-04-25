@@ -188,8 +188,13 @@ impl TelemetryEmitter {
             match self.send_with_retry(&payload, &sig, 1).await {
                 Ok(()) => {
                     let conn = self.queue.lock().expect("queue mutex poisoned");
-                    if let Err(e) = conn.execute("DELETE FROM event_queue WHERE id = ?1", params![id]) {
-                        error!("Failed to delete queued event {} after successful send: {}", id, e);
+                    if let Err(e) =
+                        conn.execute("DELETE FROM event_queue WHERE id = ?1", params![id])
+                    {
+                        error!(
+                            "Failed to delete queued event {} after successful send: {}",
+                            id, e
+                        );
                     }
                 }
                 Err(_) => {
@@ -198,7 +203,10 @@ impl TelemetryEmitter {
                         "UPDATE event_queue SET attempts = attempts + 1 WHERE id = ?1",
                         params![id],
                     ) {
-                        error!("Failed to increment attempts for queued event {}: {}", id, e);
+                        error!(
+                            "Failed to increment attempts for queued event {}: {}",
+                            id, e
+                        );
                     }
                 }
             }
