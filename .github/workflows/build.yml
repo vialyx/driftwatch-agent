@@ -54,19 +54,25 @@ jobs:
       
       - uses: Swatinem/rust-cache@v2
       
-      - name: Install OpenSSL dependencies (Linux aarch64)
+      - name: Install Linux aarch64 cross toolchain
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
+          sudo dpkg --add-architecture arm64
           sudo apt-get update
-          sudo apt-get install -y libssl-dev:arm64
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config
       
-      - name: Build
+      - name: Build (default)
+        if: matrix.target != 'aarch64-unknown-linux-gnu'
+        run: cargo build --release --target ${{ matrix.target }} --verbose
+
+      - name: Build (Linux aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: cargo build --release --target ${{ matrix.target }} --verbose
         env:
-          OPENSSL_DIR: /usr/lib/aarch64-linux-gnu
-          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig
-          PKG_CONFIG_SYSROOT_DIR: /usr/aarch64-linux-gnu
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          PKG_CONFIG_ALLOW_CROSS: "1"
       
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

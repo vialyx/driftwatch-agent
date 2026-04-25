@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: ${{ matrix.rust }}
       
@@ -31,20 +31,20 @@ jobs:
         run: cargo test --lib --verbose
       
       - name: Run tests (integration)
-        run: cargo test --test '*' --verbose
+        run: cargo test --tests --verbose
       
       - name: Run doc tests
         run: cargo test --doc --verbose
 
   test-msrv:
-    name: Test MSRV (1.70)
+    name: Test MSRV (1.85)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.70
+          toolchain: 1.85.0
       
       - uses: Swatinem/rust-cache@v2
       
@@ -57,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - uses: dtolnay/rust-toolchain@master
+      - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
       
