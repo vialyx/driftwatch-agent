@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use std::{path::PathBuf, str::FromStr};
+use std::path::PathBuf;
 
 use anyhow::{anyhow, Context, Result};
 use tracing::{error, info, warn};
@@ -361,7 +361,7 @@ fn state_dir() -> PathBuf {
         if let Ok(path) = std::env::var("DRIFTWATCH_STATE_DIR") {
             return PathBuf::from(path);
         }
-        return PathBuf::from("/var/lib/driftwatch-agent");
+        PathBuf::from("/var/lib/driftwatch-agent")
     }
 
     #[cfg(target_os = "macos")]
@@ -370,8 +370,7 @@ fn state_dir() -> PathBuf {
             return PathBuf::from(path);
         }
         if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from_str(&home)
-                .unwrap_or_else(|_| PathBuf::from("."))
+            return PathBuf::from(home)
                 .join("Library/Application Support/driftwatch-agent");
         }
         PathBuf::from("./driftwatch-agent")
@@ -385,7 +384,7 @@ fn state_dir() -> PathBuf {
         if let Ok(program_data) = std::env::var("PROGRAMDATA") {
             return PathBuf::from(program_data).join("Driftwatch/Agent");
         }
-        return PathBuf::from("C:/ProgramData/Driftwatch/Agent");
+        PathBuf::from("C:/ProgramData/Driftwatch/Agent")
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
