@@ -1,4 +1,5 @@
 use anyhow::Result;
+use chrono::Utc;
 use std::collections::VecDeque;
 
 use crate::scoring::RiskScore;
@@ -16,8 +17,20 @@ pub enum IpcRequest {
     GetCurrent,
     #[serde(rename = "GET /risk/history")]
     GetHistory { n: usize },
+    #[serde(rename = "GET /health")]
+    GetHealth,
     #[serde(rename = "POST /risk/force-refresh")]
     ForceRefresh,
+}
+
+/// Health snapshot returned by `GET /health`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct HealthStatus {
+    pub status: &'static str,
+    pub has_latest_score: bool,
+    pub history_len: usize,
+    pub history_limit: usize,
+    pub uptime_secs: u64,
 }
 
 /// Authenticated IPC envelope.
@@ -67,6 +80,8 @@ pub struct IpcState {
     pub force_refresh_tx: tokio::sync::watch::Sender<()>,
     /// Static bearer token required for all IPC requests.
     pub auth_token: String,
+    /// Process start time used for health/readiness uptime metrics.
+    pub started_at: chrono::DateTime<Utc>,
 }
 
 impl IpcState {
@@ -81,6 +96,7 @@ impl IpcState {
             history_limit: history_limit.max(1),
             force_refresh_tx,
             auth_token,
+            started_at: Utc::now(),
         })
     }
 
@@ -94,6 +110,20 @@ impl IpcState {
         history.push_back(score);
         while history.len() > self.history_limit {
             history.pop_front();
+        }
+    }
+
+    pub async fn health(&self) -> HealthStatus {
+        let has_latest_score = self.latest_score.read().await.is_some();
+        let history_len = self.history.read().await.len();
+        let uptime_secs = (Utc::now() - self.started_at).num_seconds().max(0) as u64;
+
+        HealthStatus {
+            status: "ok",
+            has_latest_score,
+            history_len,
+            history_limit: self.history_limit,
+            uptime_secs,
         }
     }
 }
@@ -187,6 +217,19 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_health_request() {
+        let json = r#"{"token": "auth_token", "method": "GET /health"}"#;
+        let req = parse_authenticated_request(json);
+        assert!(req.is_ok());
+        let req = req.unwrap();
+        assert_eq!(req.token, "auth_token");
+        match req.request {
+            IpcRequest::GetHealth => {}
+            _ => panic!("Expected GetHealth"),
+        }
+    }
+
+    #[test]
     fn test_constant_time_eq_equal_strings() {
         assert!(constant_time_eq("token123", "token123"));
     }
@@ -217,6 +260,7 @@ mod tests {
         let state = IpcState::new(tx, "test_token".to_string(), 100);
         assert_eq!(state.auth_token, "test_token");
         assert_eq!(state.history_limit, 100);
+        assert!(state.started_at <= Utc::now());
     }
 
     #[tokio::test]
@@ -261,6 +305,18 @@ mod tests {
 
         let history = state.history.read().await;
         assert!(history.len() <= 3);
+    }
+
+    #[tokio::test]
+    async fn test_health_snapshot() {
+        let (tx, _rx) = tokio::sync::watch::channel(());
+        let state = IpcState::new(tx, "test_token".to_string(), 3);
+
+        let health = state.health().await;
+        assert_eq!(health.status, "ok");
+        assert!(!health.has_latest_score);
+        assert_eq!(health.history_len, 0);
+        assert_eq!(health.history_limit, 3);
     }
 
     #[test]

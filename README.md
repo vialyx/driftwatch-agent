@@ -123,12 +123,14 @@ Monitors enrolled device count:
 ```json
 {"token": "AUTH_TOKEN", "method": "GET /risk/current"}
 {"token": "AUTH_TOKEN", "method": "GET /risk/history", "n": 10}
+{"token": "AUTH_TOKEN", "method": "GET /health"}
 {"token": "AUTH_TOKEN", "method": "POST /risk/force-refresh"}
 ```
 
 **Responses**:
 ```json
 {"ok": true, "data": {"composite": 0.65, "level": "High", ...}}
+{"ok": true, "data": {"status": "ok", "has_latest_score": true, "history_len": 42, "history_limit": 1000, "uptime_secs": 86400}}
 {"ok": false, "error": "Authentication failed"}
 ```
 

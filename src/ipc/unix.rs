@@ -110,6 +110,11 @@ async fn dispatch(request: &str, state: &IpcState) -> String {
             serde_json::to_string(&super::IpcResponse::success(scores))
                 .unwrap_or_else(|e| format!(r#"{{"ok":false,"error":"{}"}}"#, e))
         }
+        IpcRequest::GetHealth => {
+            let health = state.health().await;
+            serde_json::to_string(&super::IpcResponse::success(health))
+                .unwrap_or_else(|e| format!(r#"{{"ok":false,"error":"{}"}}"#, e))
+        }
         IpcRequest::ForceRefresh => {
             let _ = state.force_refresh_tx.send(());
             serde_json::to_string(&super::IpcResponse::success("refresh triggered"))

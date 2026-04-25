@@ -12,6 +12,13 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   audit:
     name: Cargo Audit
@@ -30,7 +37,7 @@ jobs:
         run: cargo audit --deny warnings
 
   security-scan:
-    name: SARIF Upload
+    name: Security Lints
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +51,6 @@ jobs:
       
       - name: Run clippy with security focus
         run: cargo clippy --all-targets --all-features --message-format=json > clippy-report.json
-        continue-on-error: true
 
   deny:
     name: Cargo Deny
@@ -60,11 +66,12 @@ jobs:
         run: cargo install --locked cargo-deny
 
       - name: Run cargo deny policy checks
-        run: cargo deny --log-level warn check advisories
+        run: cargo deny --log-level warn check advisories bans licenses sources
 
   outdated:
     name: Outdated Dependencies
     runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
     steps:
       - uses: actions/checkout@v4
       
@@ -77,4 +84,3 @@ jobs:
       
       - name: Check outdated dependencies
         run: cargo outdated --exit-code 1
-        continue-on-error: true

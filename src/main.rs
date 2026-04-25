@@ -55,7 +55,9 @@ async fn main() -> Result<()> {
     let network_monitor: Arc<dyn NetworkMonitor> = build_network_monitor();
     let identity_id = get_identity_id().context("failed to resolve identity ID")?;
 
-    let device_registry: Arc<dyn DeviceRegistry> = build_device_registry(&cfg, identity_id.clone());
+    let device_registry: Arc<dyn DeviceRegistry> =
+        build_device_registry(&cfg, identity_id.clone())
+            .context("failed to initialize device registry")?;
 
     // IPC state shared between the polling loop and the IPC server.
     let (force_refresh_tx, mut force_refresh_rx) = tokio::sync::watch::channel(());
@@ -190,8 +192,15 @@ async fn main() -> Result<()> {
             _ = force_refresh_rx.changed() => {
                 info!("Force refresh triggered via IPC");
             }
+            _ = tokio::signal::ctrl_c() => {
+                info!("Shutdown signal received, exiting main loop");
+                break;
+            }
         }
     }
+
+    info!("driftwatch-agent shutdown complete");
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -236,39 +245,43 @@ fn build_network_monitor() -> Arc<dyn NetworkMonitor> {
     }
 }
 
-fn build_device_registry(cfg: &AgentConfig, identity_id: String) -> Arc<dyn DeviceRegistry> {
+fn build_device_registry(cfg: &AgentConfig, identity_id: String) -> Result<Arc<dyn DeviceRegistry>> {
     // Use the HTTP registry; authentication token is fetched from the keychain.
-    let token = keychain::get_secret("driftwatch", "registry-token")
-        .map(|b| String::from_utf8_lossy(&b).to_string())
-        .unwrap_or_default();
+    let token_bytes = keychain::get_secret("driftwatch", "registry-token")
+        .context("registry token not found in keychain")?;
+    let token = String::from_utf8(token_bytes)
+        .map_err(|e| anyhow!("registry token in keychain is not valid UTF-8: {}", e))?;
+    if token.trim().is_empty() {
+        return Err(anyhow!("registry token is empty"));
+    }
 
     #[cfg(target_os = "macos")]
     {
-        Arc::new(platform::macos::HttpDeviceRegistry {
+        Ok(Arc::new(platform::macos::HttpDeviceRegistry {
             endpoint: cfg.device_quantity.identity_registry_url.clone(),
             token,
             identity_id: identity_id.clone(),
-        })
+        }))
     }
     #[cfg(target_os = "windows")]
     {
-        Arc::new(platform::windows::HttpDeviceRegistry {
+        Ok(Arc::new(platform::windows::HttpDeviceRegistry {
             endpoint: cfg.device_quantity.identity_registry_url.clone(),
             token,
             identity_id: identity_id.clone(),
-        })
+        }))
     }
     #[cfg(target_os = "linux")]
     {
-        Arc::new(platform::linux::HttpDeviceRegistry {
+        Ok(Arc::new(platform::linux::HttpDeviceRegistry {
             endpoint: cfg.device_quantity.identity_registry_url.clone(),
             token,
             identity_id: identity_id.clone(),
-        })
+        }))
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
-        Arc::new(platform::stub::StubDeviceRegistry)
+        Ok(Arc::new(platform::stub::StubDeviceRegistry))
     }
 }
 
